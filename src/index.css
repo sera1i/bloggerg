@@ -3,6 +3,6 @@
 @tailwind utilities;
 
 body {
-  @apply bg-blue-100; /* replace with your desired Tailwind color */
+  @apply bg-blue-200; /* replace with your desired Tailwind color */
 }
 
