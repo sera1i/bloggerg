@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { MessageCircle, Send } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,6 +10,8 @@ interface CommentsSectionProps {
   postId: string;
 }
 
+const COOLDOWN_SECONDS = 30; // 30-second client-side cooldown
+
 export function CommentsSection({ postId }: CommentsSectionProps) {
   const { user } = useAuth();
   const [comments, setComments] = useState<Comment[]>([]);
@@ -17,9 +19,41 @@ export function CommentsSection({ postId }: CommentsSectionProps) {
   const [content, setContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [cooldown, setCooldown] = useState(0);
+  const cooldownRef = useRef<number | null>(null);
+
+  const LAST_COMMENT_KEY = `bloggerg:last_comment:${postId}`;
 
   useEffect(() => {
+    // Auto-fill name if user is signed in
+    if (user?.email) {
+      const nameFromEmail = user.email.split('@')[0];
+      setAuthorName(nameFromEmail);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    // Load comments
     void loadComments();
+
+    // Restore cooldown from localStorage
+    const v = localStorage.getItem(LAST_COMMENT_KEY);
+    if (v) {
+      const ts = Number(v);
+      if (!Number.isNaN(ts)) {
+        const elapsed = Math.floor((Date.now() - ts) / 1000);
+        const remaining = Math.max(0, COOLDOWN_SECONDS - elapsed);
+        if (remaining > 0) startCooldown(remaining);
+      }
+    }
+
+    // Cleanup timer on unmount
+    return () => {
+      if (cooldownRef.current) {
+        window.clearInterval(cooldownRef.current);
+        cooldownRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [postId]);
 
@@ -37,8 +71,32 @@ export function CommentsSection({ postId }: CommentsSectionProps) {
     }
   };
 
+  const startCooldown = (seconds: number) => {
+    setCooldown(seconds);
+    localStorage.setItem(LAST_COMMENT_KEY, String(Date.now()));
+
+    if (cooldownRef.current) window.clearInterval(cooldownRef.current);
+    cooldownRef.current = window.setInterval(() => {
+      setCooldown((c) => {
+        if (c <= 1) {
+          if (cooldownRef.current) {
+            window.clearInterval(cooldownRef.current);
+            cooldownRef.current = null;
+          }
+          return 0;
+        }
+        return c - 1;
+      });
+    }, 1000);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (cooldown > 0) {
+      setError(`Please wait ${cooldown}s before posting again.`);
+      return;
+    }
+
     setError('');
     setSubmitting(true);
 
@@ -72,16 +130,14 @@ export function CommentsSection({ postId }: CommentsSectionProps) {
 
       if (insertError) throw insertError;
 
-      // If insertion returned the new row, append it without refetching
       if (inserted) {
         setComments((c) => [...c, inserted as Comment]);
       } else {
-        // fallback: reload all comments
         await loadComments();
       }
 
-      setAuthorName('');
       setContent('');
+      startCooldown(COOLDOWN_SECONDS);
     } catch (err: any) {
       const msg =
         err?.message ||
@@ -116,7 +172,6 @@ export function CommentsSection({ postId }: CommentsSectionProps) {
             onChange={(e) => setAuthorName(e.target.value)}
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             placeholder={user?.email ?? 'Enter your name (or leave blank)'}
-            aria-label="Your name"
           />
         </div>
 
@@ -133,11 +188,8 @@ export function CommentsSection({ postId }: CommentsSectionProps) {
             maxLength={1000}
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
             placeholder="Share your thoughts..."
-            aria-label="Comment"
           />
-          <div className="text-right text-xs text-gray-400 mt-1">
-            {content.length}/1000
-          </div>
+          <div className="text-right text-xs text-gray-400 mt-1">{content.length}/1000</div>
         </div>
 
         {error && (
@@ -146,14 +198,20 @@ export function CommentsSection({ postId }: CommentsSectionProps) {
           </div>
         )}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="flex items-center gap-2 bg-blue-600 text-white py-2 px-6 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-        >
-          <Send size={18} />
-          {submitting ? 'Posting...' : 'Post Comment'}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            disabled={submitting || cooldown > 0}
+            className="flex items-center gap-2 bg-blue-600 text-white py-2 px-6 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+          >
+            <Send size={18} />
+            {submitting ? 'Posting...' : 'Post Comment'}
+          </button>
+
+          {cooldown > 0 && (
+            <div className="text-sm text-gray-500">Wait {cooldown}s before posting again</div>
+          )}
+        </div>
       </form>
 
       <div className="space-y-4">
