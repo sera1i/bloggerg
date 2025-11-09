@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { MessageCircle, Send } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 import type { Database } from '../lib/database.types';
 
 type Comment = Database['public']['Tables']['comments']['Row'];
@@ -10,6 +11,7 @@ interface CommentsSectionProps {
 }
 
 export function CommentsSection({ postId }: CommentsSectionProps) {
+  const { user } = useAuth();
   const [comments, setComments] = useState<Comment[]>([]);
   const [authorName, setAuthorName] = useState('');
   const [content, setContent] = useState('');
@@ -17,18 +19,21 @@ export function CommentsSection({ postId }: CommentsSectionProps) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    loadComments();
+    void loadComments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [postId]);
 
   const loadComments = async () => {
-    const { data } = await supabase
-      .from('comments')
-      .select('*')
-      .eq('post_id', postId)
-      .order('created_at', { ascending: true });
+    try {
+      const { data } = await supabase
+        .from('comments')
+        .select('*')
+        .eq('post_id', postId)
+        .order('created_at', { ascending: true });
 
-    if (data) {
-      setComments(data);
+      setComments(data ?? []);
+    } catch (err) {
+      console.error('Failed to load comments:', err);
     }
   };
 
@@ -37,32 +42,57 @@ export function CommentsSection({ postId }: CommentsSectionProps) {
     setError('');
     setSubmitting(true);
 
+    const name = (authorName || (user?.email ?? 'Anonymous')).trim();
+    const body = (content || '').trim();
+
+    if (body.length < 3) {
+      setError('Comment is too short (min 3 characters).');
+      setSubmitting(false);
+      return;
+    }
+    if (body.length > 1000) {
+      setError('Comment is too long (max 1000 characters).');
+      setSubmitting(false);
+      return;
+    }
+
     try {
-      const { error: insertError } = await supabase
+      const payload: Partial<Comment> = {
+        post_id: postId,
+        author_name: name,
+        content: body,
+        user_id: user?.id ?? null,
+      };
+
+      const { error: insertError, data: inserted } = await supabase
         .from('comments')
-        .insert({
-          post_id: postId,
-          author_name: authorName,
-          content,
-        });
+        .insert(payload)
+        .select()
+        .single();
 
       if (insertError) throw insertError;
 
+      // If insertion returned the new row, append it without refetching
+      if (inserted) {
+        setComments((c) => [...c, inserted as Comment]);
+      } else {
+        // fallback: reload all comments
+        await loadComments();
+      }
+
       setAuthorName('');
       setContent('');
-      loadComments();
     } catch (err: any) {
-  const msg =
-    err?.message ||
-    err?.error_description ||
-    err?.hint ||
-    (typeof err === 'string' ? err : JSON.stringify(err));
-  console.error('Comment insert failed:', err);
-  setError(msg);
-} finally {
-  setSubmitting(false);
-}
-
+      const msg =
+        err?.message ||
+        err?.error_description ||
+        err?.hint ||
+        (typeof err === 'string' ? err : JSON.stringify(err));
+      console.error('Comment insert failed:', err);
+      setError(msg);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -70,11 +100,11 @@ export function CommentsSection({ postId }: CommentsSectionProps) {
       <div className="flex items-center gap-2 mb-6">
         <MessageCircle size={24} className="text-gray-700" />
         <h2 className="text-2xl font-bold text-gray-900">
-          Comments ({comments.length})
+          Comments (<span aria-live="polite">{comments.length}</span>)
         </h2>
       </div>
 
-      <form onSubmit={handleSubmit} className="mb-8 space-y-4">
+      <form onSubmit={handleSubmit} className="mb-8 space-y-4" aria-label="Add a comment">
         <div>
           <label htmlFor="authorName" className="block text-sm font-medium text-gray-700 mb-1">
             Your Name
@@ -84,9 +114,9 @@ export function CommentsSection({ postId }: CommentsSectionProps) {
             type="text"
             value={authorName}
             onChange={(e) => setAuthorName(e.target.value)}
-            required
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="Enter your name"
+            placeholder={user?.email ?? 'Enter your name (or leave blank)'}
+            aria-label="Your name"
           />
         </div>
 
@@ -100,9 +130,14 @@ export function CommentsSection({ postId }: CommentsSectionProps) {
             onChange={(e) => setContent(e.target.value)}
             required
             rows={3}
+            maxLength={1000}
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
             placeholder="Share your thoughts..."
+            aria-label="Comment"
           />
+          <div className="text-right text-xs text-gray-400 mt-1">
+            {content.length}/1000
+          </div>
         </div>
 
         {error && (
