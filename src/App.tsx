@@ -19,7 +19,7 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      <header className="bg-white shadow-sm border-b border-gray-200">
+      <header className="h-16 bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <PenSquare size={32} className="text-blue-600" />
@@ -47,7 +47,7 @@ function AppContent() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-8">
+      <main className="max-w-6xl mx-auto px-4 py-8 min-h-[60vh]">
         {isOwner ? <AuthorDashboard /> : <BlogView />}
       </main>
 

@@ -1,10 +1,15 @@
 import { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { CommentsSection } from './CommentsSection';
+import { lazy, Suspense } from 'react';
 import type { Database } from '../lib/database.types';
 
 type Post = Database['public']['Tables']['posts']['Row'];
+
+// Lazy-load named export CommentsSection
+const CommentsSection = lazy(() =>
+  import('./CommentsSection').then((mod) => ({ default: mod.CommentsSection }))
+);
 
 export function BlogView() {
   const [posts, setPosts] = useState<Post[]>([]);
@@ -12,7 +17,7 @@ export function BlogView() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadPosts();
+    void loadPosts();
   }, []);
 
   const loadPosts = async () => {
@@ -22,9 +27,7 @@ export function BlogView() {
       .select('*')
       .order('post_date', { ascending: false });
 
-    if (data) {
-      setPosts(data);
-    }
+    setPosts(data ?? []);
     setLoading(false);
   };
 
@@ -53,9 +56,9 @@ export function BlogView() {
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="bg-white rounded-lg shadow-lg p-8">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">{currentPost.title}</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">{currentPost?.title}</h1>
           <p className="text-sm text-gray-500">
-            {new Date(currentPost.post_date).toLocaleDateString('en-US', {
+            {new Date(currentPost!.post_date).toLocaleDateString('en-US', {
               weekday: 'long',
               year: 'numeric',
               month: 'long',
@@ -65,12 +68,12 @@ export function BlogView() {
         </div>
 
         <div className="prose max-w-none mb-8">
-          <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">{currentPost.content}</p>
+          <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">{currentPost?.content}</p>
         </div>
 
         <div className="flex items-center justify-between pt-6 border-t border-gray-200">
           <button
-            onClick={() => setCurrentIndex(currentIndex + 1)}
+            onClick={() => setCurrentIndex((i) => Math.min(i + 1, posts.length - 1))}
             disabled={!hasNext}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
@@ -83,7 +86,7 @@ export function BlogView() {
           </span>
 
           <button
-            onClick={() => setCurrentIndex(currentIndex - 1)}
+            onClick={() => setCurrentIndex((i) => Math.max(i - 1, 0))}
             disabled={!hasPrev}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
@@ -93,7 +96,11 @@ export function BlogView() {
         </div>
       </div>
 
-      <CommentsSection postId={currentPost.id} />
+      {currentPost && (
+        <Suspense fallback={<div className="text-sm text-neutral-500">Loading comments…</div>}>
+          <CommentsSection postId={currentPost.id} />
+        </Suspense>
+      )}
     </div>
   );
 }
